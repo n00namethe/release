@@ -1,0 +1,122 @@
+#!/bin/sh
+what="$1"
+shift
+data="$@"
+AWK="/system/sdcard/bin/gawk"
+CURL="/system/sdcard/bin/curl"
+apiToken="5822981803:AAF_a-kNijNRDz9xLEgXDGubNLHOcxglWfg"
+userChatId="1393285239"
+
+sendMessage() {
+  text="$(echo "${@}" | sed 's:\\n:\n:g')"
+  echo "Sending message: $text"
+
+  $CURL -s \
+    -X POST \
+    https://api.telegram.org/bot$apiToken/sendMessage \
+    --data-urlencode "text=$text" \
+    -d "chat_id=$userChatId"
+}
+
+sendFile() {
+  if [ -r $1 ]
+  then 
+    echo "Sending file: $1"
+    $CURL -s \
+      -X POST \
+      https://api.telegram.org/bot$apiToken/sendDocument \
+      -F chat_id="$userChatId" \
+      -F document=@"$1"
+  else
+    echo "File not found: $1"
+  fi
+}
+
+sendPhoto() {
+  if [ -r $1 ]
+  then
+    caption="$(hostname)-$(date +"%d%m%Y_%H%M%S")"
+    echo "Sending Photo: $1 $caption" >> /tmp/telegram.log
+    $CURL -s \
+      -X POST \
+      https://api.telegram.org/bot$apiToken/sendPhoto \
+      -F chat_id="$userChatId" \
+      -F photo="@${1}" \
+      -F caption="${caption}"
+  else
+    echo "File not found: $1"
+  fi
+}
+
+sendVideo() {
+  if [ -r $1 ]
+  then
+    bytes=$(busybox stat -c %s $1)
+    caption="$(hostname)-$(date +"%d%m%Y_%H%M%S")"
+    echo "Sending Video: $1 $caption (${bytes}bytes)" >> /tmp/telegram.log
+    $CURL -s \
+      -X POST \
+      https://api.telegram.org/bot$apiToken/sendVideo \
+      -F chat_id="$userChatId" \
+      -F video="@${1}" \
+      -F caption="${caption}"
+  else
+    echo "File not found: $1"
+  fi
+}
+
+sendAnimation() {
+  if [ -r $1 ]
+  then
+    caption="$(hostname)-$(date +"%d%m%Y_%H%M%S")"
+    echo "Sending Animation: $1 $caption" >> /tmp/telegram.log
+    $CURL -s \
+      -X POST \
+      https://api.telegram.org/bot$apiToken/sendAnimation \
+      -F chat_id="$userChatId" \
+      -F animation="@${1}" \
+      -F caption="${caption}"
+  else
+    echo "File not found: $1"
+  fi
+}
+
+telegram(){
+  offset=0
+  while :
+  do
+    updates=$($CURL -s https://api.telegram.org/bot$apiToken/getUpdates -d "offset=$offset")
+    success=$(echo $updates | awk -F, '{print $1}' | $AWK -F: '{print $2}')
+    if [[ $success == "true" ]]
+    then
+      result=$(echo $updates | grep -o "\[.*\]\}$" | $AWK 'BEGIN{FS="},{"} {print $1}')
+      if [ "$result" == "[]}" ]
+      then
+        continue
+      else
+        update_id=$(echo $result | grep -o "\"update_id\":[0-9]*" | $AWK -F: '{print $2}')
+        userChatId=$(echo $result | grep -o "\"chat\":{\"id\":[0-9]*" | $AWK -F: '{print $3}')
+        text=$(echo $result | grep -o "\"text\":\"[^\"]*\"" | awk -F: '{print $2}' | $AWK -F\" '{print $2}')
+       if [ "$text" == "/panoramic" ];
+        then
+          sendMessage "Making photo..."
+          path=$(./test_client)
+          sendFile $path
+          sleep 2
+        else
+          sleep 2
+        fi
+        offset=$(($update_id + 1))
+      fi
+    fi
+  done
+}
+
+[ "$what" == "m" ] && sendMessage $data
+[ "$what" == "f" ] && sendFile $data
+[ "$what" == "p" ] && sendPhoto $data
+[ "$what" == "v" ] && sendVideo $data
+[ "$what" == "a" ] && sendAnimation $data
+[ "$what" == "t" ] && telegram
+
+[ -z "$what" ] && echo -e "$0 <m|f|p> <data>\n m: message\n f: file\n p: picture\n v: video\n a: animation\n t: telegram bot"
